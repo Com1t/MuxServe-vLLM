@@ -50,24 +50,22 @@ class ModelConfig:
             weights. If None, we assume the model weights are not quantized.
     """
 
-    def __init__(
-        self,
-        model: str,
-        model_name: str,
-        tokenizer: str,
-        tokenizer_mode: str,
-        trust_remote_code: bool,
-        download_dir: Optional[str],
-        load_format: str,
-        dtype: str,
-        seed: int,
-        revision: Optional[str] = None,
-        tokenizer_revision: Optional[str] = None,
-        max_model_len: Optional[int] = None,
-        quantization: Optional[str] = None,
-        mps_percentage: int = 100,
-        flexstore_port: Optional[str] = None
-    ) -> None:
+    def __init__(self,
+                 model: str,
+                 model_name: str,
+                 tokenizer: str,
+                 tokenizer_mode: str,
+                 trust_remote_code: bool,
+                 download_dir: Optional[str],
+                 load_format: str,
+                 dtype: str,
+                 seed: int,
+                 revision: Optional[str] = None,
+                 tokenizer_revision: Optional[str] = None,
+                 max_model_len: Optional[int] = None,
+                 quantization: Optional[str] = None,
+                 mps_percentage: int = 100,
+                 flexstore_port: Optional[str] = None) -> None:
         self.model = model
         self.model_name = model_name
         self.tokenizer = tokenizer
@@ -179,8 +177,7 @@ class ModelConfig:
         from muxserve.flexserver.pipeworker import PipeWorker
         total_num_hidden_layers = self.hf_config.num_hidden_layers
         partition = PipeWorker.pipeline_split(
-                total_num_hidden_layers,
-                parallel_config.pipeline_parallel_size)
+            total_num_hidden_layers, parallel_config.pipeline_parallel_size)
         return max(partition)
 
 
@@ -396,10 +393,21 @@ def _get_and_verify_max_len(
         derived_max_model_len = default_max_len
 
     rope_scaling = getattr(hf_config, "rope_scaling", None)
-    if rope_scaling is not None:
-        assert "factor" in rope_scaling
-        scaling_factor = rope_scaling["factor"]
-        derived_max_model_len *= scaling_factor
+    print(f"Found rope_scaling={rope_scaling} in model's config.json.")
+    if rope_scaling is not None and "gemma3" not in hf_config.model_type:
+        # No need to consider "type" key because of patch_rope_scaling when
+        # loading HF config
+        rope_type = rope_scaling["rope_type"]
+
+        if rope_type not in ("su", "longrope", "llama3"):
+            # NOTE: rope_type == "default" does not define factor
+            # https://github.com/huggingface/transformers/blob/v4.45.2/src/transformers/modeling_rope_utils.py
+            scaling_factor = rope_scaling.get("factor", 1.0)
+
+            if rope_type == "yarn":
+                derived_max_model_len = rope_scaling[
+                    "original_max_position_embeddings"]
+            derived_max_model_len *= scaling_factor
 
     if max_model_len is None:
         max_model_len = derived_max_model_len

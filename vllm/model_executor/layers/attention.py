@@ -11,8 +11,8 @@ from vllm import attention_ops
 from vllm import cache_ops
 from vllm.model_executor.input_metadata import InputMetadata
 from vllm.model_executor.layers.rotary_embedding import (
-    DynamicNTKScalingRotaryEmbedding, LinearScalingRotaryEmbedding,
-    RotaryEmbedding)
+    Llama3RotaryEmbedding, DynamicNTKScalingRotaryEmbedding,
+    LinearScalingRotaryEmbedding, RotaryEmbedding)
 
 _SUPPORTED_HEAD_SIZES = [64, 80, 96, 112, 128, 256]
 
@@ -152,7 +152,8 @@ class PagedAttention(nn.Module):
             input_metadata: metadata for paged attention.
         """
         is_muxserve = input_metadata.block_tables.ndim == 3
-        block_size = value_cache.shape[2] if is_muxserve else value_cache.shape[3]
+        block_size = value_cache.shape[
+            2] if is_muxserve else value_cache.shape[3]
         attention_ops.single_query_cached_kv_attention(
             output,
             query,
@@ -160,7 +161,8 @@ class PagedAttention(nn.Module):
             value_cache,
             self.head_mapping,
             self.scale,
-            input_metadata.block_tables[self.layer_idx] if is_muxserve else input_metadata.block_tables,
+            input_metadata.block_tables[self.layer_idx]
+            if is_muxserve else input_metadata.block_tables,
             input_metadata.context_lens,
             block_size,
             input_metadata.max_context_len,
@@ -270,7 +272,8 @@ class PagedAttention(nn.Module):
                 slot_mapping = input_metadata.slot_mapping[self.layer_idx]
                 assert isinstance(slot_mapping, torch.Tensor)
             elif input_metadata.slot_mapping.ndim == 3:
-                slot_mapping = input_metadata.slot_mapping[:, self.layer_idx, :]
+                slot_mapping = input_metadata.slot_mapping[:,
+                                                           self.layer_idx, :]
                 assert isinstance(slot_mapping, torch.Tensor)
             else:
                 slot_mapping = input_metadata.slot_mapping
@@ -347,9 +350,19 @@ class PagedAttentionWithRoPE(PagedAttention):
                                               max_position, base,
                                               is_neox_style)
         else:
-            scaling_type = rope_scaling["type"]
-            scaling_factor = rope_scaling["factor"]
-            if scaling_type == "linear":
+            scaling_type = rope_scaling["rope_type"]
+
+            if scaling_type == "llama3":
+                scaling_factor = rope_scaling["factor"]
+                low_freq_factor = rope_scaling["low_freq_factor"]
+                high_freq_factor = rope_scaling["high_freq_factor"]
+                original_max_position = rope_scaling[
+                    "original_max_position_embeddings"]
+                self.rotary_emb = Llama3RotaryEmbedding(
+                    head_size, rotary_dim, max_position, base, is_neox_style,
+                    scaling_factor, low_freq_factor, high_freq_factor,
+                    original_max_position)
+            elif scaling_type == "linear":
                 self.rotary_emb = LinearScalingRotaryEmbedding(
                     head_size, rotary_dim, max_position, base, is_neox_style,
                     scaling_factor)
