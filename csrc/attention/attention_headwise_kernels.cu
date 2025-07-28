@@ -49,17 +49,26 @@ __global__ void single_query_cached_kv_headwise_attention_kernel(
   const int q_stride,
   const int kv_block_stride,
   const int kv_head_stride) {
+  // how many threads will process 1 token, each token is composed of NUM_HEADS * HEAD_SIZE elements
   constexpr int THREAD_GROUP_SIZE = MAX(WARP_SIZE / BLOCK_SIZE, 1);
   constexpr int NUM_THREAD_GROUPS = NUM_THREADS / THREAD_GROUP_SIZE; // Note: This assumes THREAD_GROUP_SIZE divides NUM_THREADS
   assert(NUM_THREADS % THREAD_GROUP_SIZE == 0);
+  // how many tokens will be processed by each thread group
+  // e.g. if BLOCK_SIZE is 16 and WARP_SIZE is 32, then THREAD_GROUP_SIZE is 2,
+  // and each thread group will process 1 tokens at a time.
   constexpr int NUM_TOKENS_PER_THREAD_GROUP = (BLOCK_SIZE + WARP_SIZE - 1) / WARP_SIZE;
   constexpr int NUM_WARPS = NUM_THREADS / WARP_SIZE;
   const int thread_idx = threadIdx.x;
   const int warp_idx = thread_idx / WARP_SIZE;
   const int lane = thread_idx % WARP_SIZE;
 
+  // Each thread block processes one head at a time.
+  // The head index is given by the block index.
+  // The sequence index is given by the second dimension of the block index.
+  // The kv_head_idx is the head index in the key-value cache.
   const int head_idx = blockIdx.x;
   const int num_heads = gridDim.x;
+  const int num_kv_heads = kv_block_stride / kv_head_stride;
   const int kv_head_idx = head_mapping[head_idx];
   const int seq_idx = blockIdx.y;
   const float alibi_slope = alibi_slopes == nullptr ? 0.f : alibi_slopes[head_idx];
@@ -106,7 +115,7 @@ __global__ void single_query_cached_kv_headwise_attention_kernel(
   constexpr int x = 16 / sizeof(scalar_t);
   float qk_max = -FLT_MAX;
 
-  const int* block_table = block_tables + seq_idx * num_heads * max_num_blocks_per_seq + kv_head_idx * max_num_blocks_per_seq;
+  const int* block_table = block_tables + seq_idx * num_kv_heads * max_num_blocks_per_seq + kv_head_idx * max_num_blocks_per_seq;
   const int context_len = context_lens[seq_idx];
   const int num_blocks = (context_len + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
@@ -344,8 +353,17 @@ void single_query_cached_kv_headwise_attention_launcher(
   int max_num_blocks_per_seq = block_tables.size(2);
   int q_stride = query.stride(0);
 
+  auto head_mapping_cpu = head_mapping.to(torch::kCPU);
+  int* head_mapping_cpu_ptr = head_mapping_cpu.data_ptr<int>();
+  int num_queries_per_kv = 1;
+  for (int i = 1; i < num_heads; ++i) {
+    if (head_mapping_cpu_ptr[i] == head_mapping_cpu_ptr[0])
+      num_queries_per_kv++;
+    else
+      break;
+  }
   int kv_head_stride = key_cache.stride(0);
-  int kv_block_stride = num_heads * kv_head_stride;
+  int kv_block_stride = (num_heads / num_queries_per_kv) * kv_head_stride;
 
   int thread_group_size = MAX(WARP_SIZE / BLOCK_SIZE, 1);
   assert(head_size % thread_group_size == 0);
