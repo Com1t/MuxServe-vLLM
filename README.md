@@ -61,11 +61,24 @@ vLLM seamlessly supports many Hugging Face models, including the following archi
 - OPT (`facebook/opt-66b`, `facebook/opt-iml-max-30b`, etc.)
 - Qwen (`Qwen/Qwen-7B`, `Qwen/Qwen-7B-Chat`, etc.)
 
-Install vLLM with pip or [from source](https://vllm.readthedocs.io/en/latest/getting_started/installation.html#build-from-source):
+## Installation
 
-```bash
-pip install vllm
 ```
+conda create -n muxserve python=3.9
+conda activate muxserve
+git clone https://github.com/EfficientLLMSys/MuxServe-vLLM.git
+cd MuxServe-vLLM
+pip install -e .  # This may take 5-10 minutes.
+```
+If there are errors regarding torch version, install pytorch seprately and add "--no-build-isolation" in the pip install.
+
+## Modify the C/C++ extensions
+
+After the modification of extensions use the following to rebuild
+```
+python setup.py build_ext --inplace
+```
+
 
 ## Getting Started
 
