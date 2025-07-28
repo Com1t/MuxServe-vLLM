@@ -16,9 +16,9 @@ ROOT_DIR = os.path.dirname(__file__)
 SUPPORTED_ARCHS = ["7.0", "7.5", "8.0", "8.6", "8.9", "9.0"]
 
 # Compiler flags.
-CXX_FLAGS = ["-g", "-O2", "-std=c++17"]
+CXX_FLAGS = ["-g", "-O0", "-std=c++17"]
 # TODO(woosuk): Should we use -O3?
-NVCC_FLAGS = ["-O2", "-std=c++17"]
+NVCC_FLAGS = ["-G", "-g", "-O0", "-std=c++17"]
 
 ABI = 1 if torch._C._GLIBCXX_USE_CXX11_ABI else 0
 CXX_FLAGS += [f"-D_GLIBCXX_USE_CXX11_ABI={ABI}"]
@@ -114,9 +114,10 @@ if nvcc_cuda_version < Version("11.8"):
 
 # Add target compute capabilities to NVCC flags.
 for capability in compute_capabilities:
-    num = capability[0] + capability[2]
+    capability = capability.split(".")
+    num = capability[0] + capability[1]
     NVCC_FLAGS += ["-gencode", f"arch=compute_{num},code=sm_{num}"]
-    if capability.endswith("+PTX"):
+    if capability[-1].endswith("+PTX"):
         NVCC_FLAGS += ["-gencode", f"arch=compute_{num},code=compute_{num}"]
 
 # Use NVCC threads to parallelize the build.
@@ -141,8 +142,7 @@ ext_modules.append(cache_extension)
 attention_extension = CUDAExtension(
     name="vllm.attention_ops",
     sources=[
-        "csrc/attention.cpp",
-        "csrc/attention/attention_kernels.cu",
+        "csrc/attention.cpp", "csrc/attention/attention_kernels.cu",
         "csrc/attention/attention_headwise_kernels.cu"
     ],
     extra_compile_args={
