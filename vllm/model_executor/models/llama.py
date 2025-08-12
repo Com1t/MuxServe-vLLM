@@ -293,6 +293,7 @@ class LlamaForCausalLM(nn.Module):
                                              bias=False,
                                              gather_output=False,
                                              quant_config=None)
+        self.lm_head.weight = self.model.embed_tokens.weight
         self.sampler = Sampler(config.vocab_size)
 
     def forward(
@@ -416,9 +417,14 @@ class LlamaForCausalLM(nn.Module):
             if is_transposed:
                 param = param.T
 
-            if "embed_tokens" in name or "lm_head" in name:
-                load_padded_tensor_parallel_vocab(param, loaded_weight,
-                                                  tp_rank)
+            if "embed_tokens" in name:
+                load_padded_tensor_parallel_vocab(param, loaded_weight, tp_rank)
+                # tie lm_head manually since it's not in HF weights
+                self.lm_head.weight.data.copy_(self.model.embed_tokens.weight.data)
+                continue
+
+            # If lm_head is not in the checkpoint, don't attempt to load it
+            if "lm_head" in name:
                 continue
 
             load_tensor_parallel_weights(param, loaded_weight, name,
